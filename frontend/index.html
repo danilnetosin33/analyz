@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://getbootstrap.com/docs/5.3/assets/css/docs.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ractive"></script>
+    <script src="https://kit.fontawesome.com/e45f08485e.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ajv/8.12.0/ajv7.min.js"
+    integrity="sha512-U2SW9Ihh3GF6F8gP8QgLS+I244xnM5pFCh3cigpw7bAzUDnKDlxdlFL4kjyXTle8SJl/tJ0gdnwd44Eb3hLG/Q=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="./components.js"></script>
+    <title>Analyz UI</title>
+</head>
+<body style="width: 94%;margin: auto;">
+    <div class="mb-2 d-grid col-8 mx-auto" id="exportSettings"></div>
+    <div class="mt-2">
+        <div class="mb-2 d-grid col-8 mx-auto"  id="fullSettings"></div>
+        <div class="mb-2 d-grid col-8 mx-auto"  id="dataSettings"></div>
+        <div class="mb-2 d-grid col-8 mx-auto" id="configSettings"></div>
+        <button id="btn_calculate" class="mb-2 d-grid col-8 mx-auto btn btn-primary" > CALCULATE </button>
+    </div>
+    
+    <div id="debug"></div>
+    <div id="content" style="min-height:70vh;max-height:80vh;overflow: auto;">
+        <div id="table-profit"></div>
+    </div>
+
+    <div id="toast">
+    </div>  
+
+    <script>
+        fetch("/available_dates").then(res=>res.json()).then((res)=>{window.all_available_dates= res})
+
+
+
+
+        window.DATA_SETTINGS = {}
+        window.CONFIG_SETTINGS = {}
+
+        // CALCULATE CALL
+        let btn_calculate = document.getElementById("btn_calculate")
+
+
+        // !!! don`t need to fill forms --> have default settings obj (for testing)
+        btn_calculate.onclick = (ev)=>{
+
+            let data = {}
+                if(Object.keys(window.DATA_SETTINGS).length >= 3 &&  window.DATA_SETTINGS.timeframe !="" && Object.keys(window.CONFIG_SETTINGS).length >= 5){
+                    ev.target.disabled = true
+                   data = { dataSettings: window.DATA_SETTINGS, configSettings:window.CONFIG_SETTINGS}
+                    
+                   window.tableProfit.set("fullData" ,  [])
+                    fetch("/calculate", 
+                    {
+                        method:"POST", 
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(data)
+                    }).then((response) => {
+                            return response.json();
+                        })
+                        .then((data) => {
+                            window.tableProfit.set("fullData" ,  data)
+                            window.tableProfit.update("@global")
+                            ev.target.disabled = false
+                        });
+            
+                }
+                else{
+
+                    let ractive = new Ractive({
+                        el:"#toast",
+                        template:`
+                            <toast type="error" text="Check settings! " />
+                        `
+                    })
+            }
+        }
+    
+
+
+let multifieldAJV = 
+{
+    type : "array",
+    items:[{
+        type:"object",
+        properties:{
+            from: {type: "string"},
+            to:{type:"string"}
+        }
+    }]
+}
+
+let rangeAJV = {
+    type:"array",
+    items:[{type:"number", minimum: 0}]
+}
+
+window.tableProfit  = new Ractive({
+        el: "#table-profit",
+        data : {
+            selectConfig:{field:"symbol", options:[] },
+            currentData:[],
+            currentPage:0,
+            currentPageData:[],
+            filterState:{profit:true}},
+        template:`
+            {{#if (Array.isArray(fullData) && fullData.length == 0) || (typeof fullData === "object" && Object.keys(fullData).length == 0) }}
+                <!-- LOADER --> 
+                <div class="d-flex justify-content-center" style="margin-top:30px">
+                    <div class="spinner-grow" role="status" style="margin-right:5px">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="spinner-grow" role="status" style="margin-right:5px">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="spinner-grow" role="status" style="margin-right:5px">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            {{elseif (Array.isArray(fullData) && fullData.length>0) || (typeof fullData === "object" && Object.keys(fullData).length > 0) }}
+            <div style="display:flex;justify-content:space-between;align-items: center;">
+                
+                <div style="width:30%">
+                    <select-input config={{selectConfig}} value={{symbolValue}} />
+                </div>
+                <div>
+                    {{#if symbolValue && symbolValue != ""}}
+                        <button type="button" class="btn btn-outline-primary" on-click="@this.sendToExport(fullData[symbolValue],symbolValue, 'csv')"  data-bs-toggle="modal" data-bs-target="#export_file_modal" ><i class="fa-solid fa-file-arrow-down"></i></button>
+                    {{/if}}
+                </div>
+            </div>
+        {{/if}}
+        {{#if currentPageData.length>0 && symbolValue && symbolValue != "" }}
+         <table class="table table-hover table-bordered caption-top ">
+                <caption>
+                    <div>Orders call : {{currentData[0].orderCall}}</div>
+                    <div>Dates : {{@global.DATA_SETTINGS.date.from}} - {{@global.DATA_SETTINGS.date.to}}</div>
+                </caption>
+   
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col" on-click=@this.filterData("profit") ><div style="display:flex;justify-content:space-between"><span>Profit</span><span>{{#if filterState.profit}}<i class="fa-solid fa-arrow-up"></i> {{else}} <i class="fa-solid fa-arrow-down"></i>{{/if}}</span></div></th>
+                        <th scope="col">Orders</th>
+                        <th scope="col">Bars</th>
+                        <th scope="col">Bars (Reversal)</th>
+                        <th scope="col">Bars ignore(after open)</th>
+                        <th scope="col">Bars ignore(after close)</th>
+                        <th scope="col">Profit %</th>
+                        <th scope="col">CCI length</th>
+                        <th scope="col">CCI value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each currentPageData}}
+                        <tr>
+                            <td>{{Math.floor(profit)}}</td>
+                            <td>{{orders}}</td>
+                            <td>{{barsClose}}</td>
+                            <td>{{barsCloseReversal}}</td>
+                            <td>{{barsIgnore}}</td>
+                            <td>{{barsIgnoreClose}}</td>
+                            <td>{{profitPercantage}}</td>  
+                            <td>{{cciLength}}</td>
+                            <td>{{cciValue}}</td>
+                        </tr> 
+                    {{/each}}
+                </tbody>
+            </table>
+
+            <nav>
+                <ul class="pagination justify-content-center ">
+                    <li style="cursor:pointer;user-select: none;" class="page-item {{#if currentPage == 0}}disabled{{/if}}" on-click="@this.prevPage()"><span class="page-link">Previous</span></li>
+                    <li class="page-item"><input class="form-control" type="number" min="0" max="Math.floor(currentData.length/10)" value={{currentPage}} on-blur="@this.changePage()" /></li>
+                    <li style="cursor:pointer;user-select: none;" class="page-item {{#if currentPage == Math.floor(currentData.length/10)}}disabled{{/if}} " on-click="@this.nextPage()" ><span class="page-link" href="#">Next</span></li>
+                </ul>
+            </nav>
+        {{/if}}
+
+        `,
+        sendToExport : function(json, fileName ,exportType){
+            window.exportRactive.set("exportData", json)
+            window.exportRactive.set("exportType", exportType)
+            window.exportRactive.set("fileName" , fileName)
+        },
+        filterData:function(param){
+            let currentData = this.get("currentData")
+            if(this.get("filterState")[param]){
+                currentData = currentData.sort((a, b) => a.profit - b.profit)
+            }
+            else{
+                currentData = currentData.sort((a, b) => b.profit - a.profit)
+            }
+            this.set("currentData", currentData)
+            this.set(`filterState.${param}`, !this.get("filterState")[param])
+        },
+        prevPage:function(){
+            let current = this.get("currentPage");
+            if(current > 0){
+                this.set("currentPage", current-1)
+                this.getCurrentPageData(this.get("currentPage"))
+            }     
+        },
+        nextPage:function(){
+            let current = this.get("currentPage");
+            if(current < Math.floor(this.get("currentData").length/10) ){
+                this.set("currentPage", current+1)
+                this.getCurrentPageData(this.get("currentPage"))
+            }  
+        },
+        changePage:function(){
+            let current = this.get("currentPage");
+            if(current > 0 && current < Math.floor(this.get("currentData").length/10)){
+                this.getCurrentPageData(current)
+            }
+            else{
+                // TODO return to available range ??
+            }
+        },
+        oncomplete:function(){
+            this.getCurrentPageData = function(page){
+                let currentData = this.get("currentData")
+                let indexStart = page*10
+                let indexEnd = indexStart + 10 // +1 because slice don`t include last index
+                let newCurrentData = currentData.slice(indexStart, indexEnd)
+                this.set("currentPageData" , newCurrentData)
+            }
+            this.observe("fullData", (newValue,oldValue)=>{
+                this.set("symbolValue" ,Object.keys(newValue)[0])
+                this.set("currentPage", 0)
+                this.set("selectConfig.options" , [...window.DATA_SETTINGS.symbols])
+            })
+            this.observe("symbolValue",(newValue,oldValue)=>{
+                if(newValue != oldValue){
+                    this.set("currentData" , this.get("fullData")[newValue] || [])
+                    this.set("currentPage", 0)
+                }
+            })
+            this.observe("currentData" , (newValue,oldValue)=>{
+                console.log("CHANGE_DATA",newValue)
+                this.getCurrentPageData(this.get("currentPage"))
+            })
+
+        }
+
+})
+window.exportRactive = new Ractive({
+    el:"#exportSettings",
+    data:{
+        number_records_tooltip : "if 0 --> return all records"
+    },
+    template:`
+    <div class="modal" id="export_file_modal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Export {{exportType.toUpperCase()}} settings :</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="export_csv_form">
+                        <form>
+                            <div class="mb-3">
+                                <label class="form-label">Sort by </label>
+                                <select class="form-select" value="{{sort_by}}">
+                                    <option value="profit_up">Profit (high to low)</option>
+                                    <option value="profit_down">Profit (low to high)</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Number records  <a data-bs-toggle="tooltip" data-bs-placement="right" data-bs-title="{{number_records_tooltip}}" > <i class="fa-sharp fa-solid fa-circle-info" style="color: #015efe;"></i> </a>    </label>
+                                <input type="number" class="form-control"  value="{{numberRecords || 0}}" min='0' />   
+                            </div>
+
+                            <div class="d-grid mt-4">
+                                <button type="button" class="btn btn-primary" data-bs-dismiss="modal" on-click="@this.exportFile()">Export... </button>
+                            </div>
+                        </form>
+                    </div>
+                    </div>
+                </div>
+            </div>
+    `,
+    exportFile:function(){
+        let type = this.get("exportType")
+        let json = this.get("exportData")
+
+        let sortBy = this.get("sort_by")  
+        if(sortBy == "profit_up"){
+            json = json.sort((a, b) => b.profit - a.profit)
+        }
+        else if (sortBy == "profit_down"){
+            json = json.sort((a, b) => a.profit - b.profit)
+        }
+        if(this.get("numberRecords") && this.get("numberRecords") > 0){
+            json = json.slice(0,this.get("numberRecords"))
+        }
+    
+        if(type.toLowerCase() == "csv"){
+            var fields = Object.keys(json[0])
+            var replacer = function(key, value) { return value === null ? '' : value  } 
+            var csv = json.map(function(row){
+            return fields.map(function(fieldName){
+                return JSON.stringify(row[fieldName], replacer)
+            }).join(',')
+            })
+            csv.unshift(fields.join(',')) // add header column
+            csv = csv.join('\r\n');
+            csvFile = new Blob([csv], {type: 'text/csv'});
+            downloadLink = document.createElement("a");
+
+            downloadLink.download = this.get("fileName") && DATA_SETTINGS.timeframe ? `${this.get("fileName")},${DATA_SETTINGS.timeframe}.csv`  : "file.csv";
+            downloadLink.href = window.URL.createObjectURL(csvFile);
+            downloadLink.style.display = "none";
+            downloadLink.click()
+        }
+
+    }
+})
+window.dataRactive = new Ractive({
+            el: "#dataSettings",
+            data:{
+                formData:{},
+                global_variable:"DATA_SETTINGS",
+                fields: [
+                    {field:"timezone",type:"select", options:["GMT-12","GMT-11","GMT-10","GMT-9","GMT-8","GMT-7","GMT-6","GMT-5","GMT-4","GMT-3","GMT-2","GMT-1","GMT0","GMT+1","GMT+2","GMT+3","GMT+4","GMT+5","GMT+6","GMT+7","GMT+8","GMT+9","GMT+10","GMT+11","GMT+12","GMT+13"], ajv:{type:"string",enum:["GMT-12","GMT-11","GMT-10","GMT-9","GMT-8","GMT-7","GMT-6","GMT-5","GMT-4","GMT-3","GMT-2","GMT-1","GMT0","GMT+1","GMT+2","GMT+3","GMT+4","GMT+5","GMT+6","GMT+7","GMT+8","GMT+9","GMT+10","GMT+11","GMT+12","GMT+13"]}},
+                    {field:"trading_hours", type:"multifield", condition:{type:"disable",trigger:"isAdvancedTradingHours",value:false}, ajv:multifieldAJV},
+                    {field: "isAdvancedTradingHours",label:"Advanced trading hours", noLabel:true, type: "checkbox" , defaultValue : false , ajv:{type:"boolean"}},
+                    {field:"sunday_trading_hours", type:"multifield",  condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"monday_trading_hours", type:"multifield",condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"tuesday_trading_hours", type:"multifield",condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"wednesday_trading_hours", type:"multifield",condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"thursday_trading_hours", type:"multifield",condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"friday_trading_hours", type:"multifield",condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"saturday_trading_hours", type:"multifield",condition:{type:"display",trigger:"isAdvancedTradingHours",value:true}, ajv:multifieldAJV},
+                    {field:"symbols", multiple:true,type:"select", options:["NQ","ES","AAPL","AMZN","GOOGL","MSFT","NVDA","TSLA" ], ajv:{type:"array",minItems:1,items:[{type:"string",enum:["NQ","ES","AAPL","AMZN","GOOGL","MSFT","NVDA","TSLA" ]}],required:true}},
+                    {field:"timeframe", type:"select", options:[{value:"",text:"Select timeframe..."},"1H","4H","1D","1W","1M","1min","3min","5min" ], ajv:{type:["string"],enum:["1H","4H","1D","1W","1M","1min","3min","5min"],required:true}},
+                    {field:"date", type:"date",range:true,ajv:{type:"object",properties:{from: {type: "string"},to:{type:"string"},required:true}}}
+                ]
+            },
+            template:
+            `
+            <button type="button" data-bs-toggle="modal" data-bs-target="#data_settings_modal" class="btn btn-outline-secondary" >Data Settings</button>
+            <div class="modal" id="data_settings_modal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Data Settings :</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="data_settings_form">
+                        <form-builder config={{fields}} global_variable="{{global_variable}}" />
+                    </div>
+                    </div>
+                </div>
+            </div>
+            `,
+            onrender:function(){
+                let modal = new bootstrap.Modal('#data_settings_modal', {})
+                this.set("modal",modal)
+            }
+        })
+window.configRactive = new Ractive({
+            el: "#configSettings",
+            data:{
+                global_variable:"CONFIG_SETTINGS",
+                fields: [
+                    {field:"barsClose", label:"Bars",type:"range", tooltip:"Exit trade after this amount of bars" ,ajv:rangeAJV},
+                    {field:"barsCloseReversal", label:"Minimum Bars", type:"range", tooltip: "Amount of bars to wait until listen to close by reversal trigger",ajv:rangeAJV},
+                    {field:"barsIgnore",label:"Bars Ignore(After Open Order)", type:"range",tooltip:"How much bars ignore after last trade opened",ajv:rangeAJV},
+                    {field:"barsIgnoreClose",label:"Bars Ignore(After Close Order)", type:"range",tooltip:"How much bars ignore after last trade closed?",ajv:rangeAJV},
+                    {field:"profitPercantage",label:"Profit", type:"range", steps:true,ajv:rangeAJV},
+                    {field:"orderCall",label:"Order Call", type:"select", options:["Both","Long Only","Short Only"],ajv:{type:"string"}},
+                    { field: "enableCCI", label: "Enable CCI?", type: "checkbox" , defaultValue : true ,ajv:{type:"boolean"}},
+                    // TODO range
+                    { field: "cciLength", label: "CCI Length", type: "range",ajv:rangeAJV },
+                    { field: "cciValue", label: "CCI Value", type: "range"  ,  selected_step : 10,ajv:rangeAJV },
+                    
+                ]
+            },
+            template:
+            `
+            <button type="button" data-bs-toggle="modal" data-bs-target="#config_settings_modal" class="btn btn-outline-secondary" >Config Settings</button>
+            <div class="modal" id="config_settings_modal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Config Settings :</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="data_settings_form">
+                        <form-builder config={{fields}} global_variable="{{global_variable}}" />
+                    </div>
+                    </div>
+                </div>
+            </div>
+            `,
+            onrender:function(){
+                let modal = new bootstrap.Modal('#config_settings_modal', {})
+                this.set("modal",modal)
+            }
+        })
+window.debugRactive = new Ractive({
+            el:"#debug",
+            data:{visibleDebug:false},
+            template:
+            `
+            <button id="debug_btn" class="btn btn-info" data-show="false" on-click="@this.toggleDebug()">Debug {{#if visibleDebug}}ON{{else}}OFF{{/if}}</button>
+            {{#if visibleDebug}}
+                <pre>{{JSON.stringify(debugData,0,4)}}</pre>
+            {{/if}}
+            `,
+            toggleDebug:function(){
+                this.set("visibleDebug", !this.get("visibleDebug"))
+            },
+            onrender:function(){
+                this.observe("@global.DATA_SETTINGS @global.CONFIG_SETTINGS", (newVal,oldVal)=>{
+                    this.set("debugData",  {...this.get("@global.DATA_SETTINGS"), ...this.get("@global.CONFIG_SETTINGS")})
+                })
+            }
+        })
+
+//initialize tooltips Bootstrap
+setTimeout(()=>{
+    document.querySelectorAll('[data-bs-toggle="tooltip"]')
+    .forEach(tooltip => {
+    new bootstrap.Tooltip(tooltip)
+})
+},1000)
+
+   
+   </script>
+
+
+
+</body>
+</html>
