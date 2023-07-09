@@ -10,7 +10,6 @@ import bodyParser from "body-parser";
 import express from "express";
 import { createRequire } from "module";
 import fs from "fs";
-
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -178,6 +177,7 @@ app.post("/calculate", function (req, res) {
   let arrParams = fullResult.resultModified;
 
   console.timeEnd("Build_params");
+  console.log("Params_length", arrParams.length);
   let alias = fullResult.alias;
   //let results = [];
   let results = {};
@@ -235,18 +235,22 @@ app.post("/calculate", function (req, res) {
           Object.keys(results).forEach((result) => {
             let result_temp = [];
             results[result].forEach((el) => {
-              result_temp = result_temp.concat(el);
+              let to_concat = false;
+              console.log("RESULT_OBJ", el);
+              try {
+                let json_str = JSON.stringify(el);
+                to_concat = true;
+              } catch (err) {
+                to_concat = false;
+              }
+              if (to_concat) {
+                result_temp = result_temp.concat(el);
+              }
             });
             results[result] = result_temp;
           });
           res.json(results);
           console.timeEnd("Total_calc");
-          console.log(
-            "RESULTS:",
-            Object.keys(results),
-            Object.values(results).length
-          );
-          //       console.timeEnd(`CALC_${symbol_bars}`);
         }
         console.log(`Worker : `, counter);
       });
@@ -255,7 +259,17 @@ app.post("/calculate", function (req, res) {
 });
 
 app.get("/available_dates", (req, res) => {
-  let symbols = ["AAPL", "AMZN", "ES", "GOOGL", "MSFT", "NQ", "NVDA", "TSLA"];
+  let symbols = [
+    "AAPL",
+    "AMZN",
+    "ES",
+    "GOOGL",
+    "MSFT",
+    "NQ",
+    "NVDA",
+    "TSLA",
+    "XAU",
+  ];
   let timeframes = ["1H", "4H", "1D", "1W", "1M", "1min", "3min", "5min"];
   let available_dates = {};
   symbols.forEach((symbol) => {

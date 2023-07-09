@@ -17,6 +17,8 @@ export default function calculateProfit(config) {
   let barsIgnore = config.barsIgnore || 5;
   let barsIgnoreClose = config.barsIgnoreClose || 5;
   let profitPercantage = config.profitPercantage || 5;
+  let lossPercantage = config.lossPercantage || 1;
+  let enableSLbyReversal = config.enableSLbyReversal || false;
   let order = 1000;
 
   // Bars Data
@@ -47,6 +49,7 @@ export default function calculateProfit(config) {
   var bearish_TAR = undefined;
 
   var isProfitPercantage = profitPercantage > 0.0;
+  var isLossPercantage = lossPercantage > 0.0;
   var isBarsClose = barsClose > 0;
   var isBarsCloseReversal = barsCloseReversal > 0;
 
@@ -66,6 +69,8 @@ export default function calculateProfit(config) {
 
   /// START
   bars_data.forEach((bar, bar_index) => {
+    let closedBySL = false;
+    let closedByTP = false;
     if (bar_index < 1) return;
     bearishReversal =
       (orderCall == "Both" || orderCall == "Long Only") &&
@@ -163,8 +168,8 @@ export default function calculateProfit(config) {
 
     let condBarsIgnore =
       arrayStatistics.length > 0 || isOpenedTrades
-        ? bar_index >=
-          arrayStatistics[arrayStatistics.length - 1].barIndex + barsIgnore
+        ? bar_index - arrayStatistics[arrayStatistics.length - 1].barIndex >
+          barsIgnore
         : true;
     let condBarsIgnoreAfterClose =
       arrayStatistics.length > 0 && isintraday
@@ -224,8 +229,48 @@ export default function calculateProfit(config) {
       lastHigh = high[bar_index - 1];
     }
     //CLOSED BY SL
+
     //LONG
-    if (low[bar_index] < lastLow && entryBarindexLong.length > 0) {
+    if (entryPriceLong.length > 0 && isLossPercantage) {
+      for (let index = entryPriceLong.length - 1; index >= 0; index--) {
+        let SL_price =
+          entryPriceLong[entryPriceLong.length - 1] *
+          ((100 - lossPercantage) / 100);
+        if (
+          SL_price >= close[bar_index] &&
+          bar_index > entryBarindexLong[entryBarindexLong.length - 1]
+        ) {
+          let elIndex = findIndexByBarIndex(
+            arrayStatistics,
+            entryBarindexLong[index]
+          );
+          arrayStatistics[elIndex] = {
+            ...arrayStatistics[elIndex],
+            timeExit: time[bar_index],
+            signalExit: "SL",
+            exitPrice: SL_price,
+            profit: countTakeProfitPerTrade(
+              entryPriceLong[index],
+              SL_price,
+              order
+            ),
+            barIndexExit: bar_index,
+          };
+          closedBySL = true;
+        }
+      }
+      if (closedBySL) {
+        entryPriceLong = [];
+        entryBarindexLong = [];
+      }
+    }
+    if (
+      enableSLbyReversal &&
+      (!isLossPercantage || !closedBySL) &&
+      low[bar_index] < lastLow &&
+      entryBarindexLong.length > 0
+    ) {
+      closedBySL = true;
       if (
         entryPriceLong.length > 0 &&
         bar_index > entryBarindexLong[entryBarindexLong.length - 1]
@@ -255,8 +300,52 @@ export default function calculateProfit(config) {
         entryBarindexLong = [];
       }
     }
+
     // SHORT
-    if (high[bar_index] > lastHigh && entryBarindexShort.length > 0) {
+    if (entryPriceShort.length > 0 && isLossPercantage) {
+      for (let index = entryPriceShort.length - 1; index >= 0; index--) {
+        let SL_price =
+          entryPriceShort[entryPriceShort.length - 1] *
+          ((100 + lossPercantage) / 100);
+        if (
+          SL_price <= low[bar_index] &&
+          bar_index > entryBarindexShort[entryBarindexShort.length - 1]
+        ) {
+          let elIndex = findIndexByBarIndex(
+            arrayStatistics,
+            entryBarindexShort[index]
+          );
+          if (elIndex != -1) {
+            arrayStatistics[elIndex] = {
+              ...arrayStatistics[elIndex],
+              timeExit: time[bar_index],
+              signalExit: "SL",
+              exitPrice: SL_price,
+              profit:
+                countTakeProfitPerTrade(
+                  entryPriceShort[index],
+                  SL_price,
+                  order
+                ) * -1,
+              barIndexExit: bar_index,
+            };
+
+            closedBySL = true;
+          }
+        }
+      }
+      if (closedBySL) {
+        entryPriceShort = [];
+        entryBarindexShort = [];
+      }
+    }
+    if (
+      enableSLbyReversal &&
+      (!isLossPercantage || !closedBySL) &&
+      high[bar_index] > lastHigh &&
+      entryBarindexShort.length > 0
+    ) {
+      closedBySL = true;
       if (
         entryPriceShort.length > 0 &&
         bar_index > entryBarindexShort[entryBarindexShort.length - 1]
@@ -350,7 +439,7 @@ export default function calculateProfit(config) {
       }
     }
 
-    //CLOSED BY  TAKE PROFIT BY PERCENTAGE
+    //CLOSED BY  TP
     //LONG
     if (entryPriceLong.length > 0 && isProfitPercantage) {
       for (let index = entryPriceLong.length - 1; index >= 0; index--) {
@@ -377,9 +466,12 @@ export default function calculateProfit(config) {
             ),
             barIndexExit: bar_index,
           };
-          entryPriceLong.splice(index, 1);
-          entryBarindexLong.splice(index, 1);
+          closedByTP = true;
         }
+      }
+      if (closedByTP) {
+        entryPriceLong = [];
+        entryBarindexLong = [];
       }
     }
     //SHORT
@@ -411,10 +503,14 @@ export default function calculateProfit(config) {
                 ) * -1,
               barIndexExit: bar_index,
             };
-            entryPriceShort.splice(index, 1);
-            entryBarindexShort.splice(index, 1);
+
+            closedByTP = true;
           }
         }
+      }
+      if (closedByTP) {
+        entryPriceShort = [];
+        entryBarindexShort = [];
       }
     }
 
